@@ -1,0 +1,75 @@
+Oracle10G RMAN Database Duplication (Doc ID 259694.1)    
+
+Entender o DE --- ohicod09  PARA--- ohimig01
+
+Run {
+Allocate channel ch00 type disk;
+Allocate channel ch01 type disk;
+Allocate channel ch02 type disk;
+Allocate channel ch03 type disk;
+Backup database format '/backup/OHICOD10/DATA_%U.bkp';
+Backup spfile format '/backup/OHICOD10/SP_%U.bkp';
+Backup current controlfile format '/backup/OHICOD10/CTL_%U.bkp';
+}
+Backup archivelog all format '/backup/OHICOD09/ARC_%U.bkp';
+}
+
+usar backup que esta: /oracle/backup/BKP_OHICOD09/
+
+
+export ORACLE_SID=OHIMIG01A
+
+alter system set cluster_database=false scope=spfile sid='*';
+
+select name from v$datafile;
+alter system set db_file_name_convert = '+OHIDATA/ohicod09/', '+OHIDATA/ohimig01/' scope=spfile;
+
+select member from v$logfile;
+alter system set log_file_name_convert = '+OHIREDO/ohicod09/onlinelog/', '+OHIREDO/ohimig01/onlinelog/', '+OHIRECO/ohicod09/onlinelog/', '+OHIRECO/ohimig01/onlinelog/' scope=spfile;
+
+Parar os dois nodes do RAC
+srvctl  stop instance -d OHIMIG01 -i OHIMIG01A
+srvctl  stop instance -d OHIMIG01 -i OHIMIG01B
+
+
+limpa o DG - do banco que vai receber o duplicate.
+
+
+startup nomount
+
+rman auxiliary /
+
+DUPLICATE DATABASE TO OHIMIG01 BACKUP LOCATION '/oracle/backup/BKP_OHICOD09/' NOFILENAMECHECK;
+
+OU
+
+export ORACLE_SID=ora201
+rman auxiliary / msglog /u02/bases_producao/BDSIGA_SEMANAL/duplicate.log << EOF
+run {
+allocate auxiliary channel cr1 type disk;
+allocate auxiliary channel cr2 type disk;
+allocate auxiliary channel cr3 type disk;
+allocate auxiliary channel cr4 type disk;
+allocate auxiliary channel cr5 type disk;
+allocate auxiliary channel cr6 type disk;
+DUPLICATE DATABASE TO ora201 BACKUP LOCATION '/u02/bases_producao/BDSIGA_SEMANAL/' NOFILENAMECHECK;
+}
+EOF
+
+
+
+alter system set cluster_database=true scope=spfile sid='*';
+
+--alter system set db_recovery_file_dest = '+OHIRECO' sid='*';
+
+shutdown immediate;
+
+startup mount
+alter database archivelog;
+alter database open;
+select log_mode from gv$database;
+
+shutdown immediate;
+
+srvctl  start instance -d OHIMIG01 -i OHIMIG01A
+srvctl  start instance -d OHIMIG01 -i OHIMIG01B
