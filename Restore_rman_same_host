@@ -1,0 +1,56 @@
+ shutdown immediate;
+ startup nomount;
+ alter system set db_name='bdprod' scope=spfile;
+ alter system set db_unique_name='bdprod2' scope=spfile;
+ shutdown immediate;
+ startup nomount;
+
+ restore controlfile from '+DATA1/ora03/backupset/2014_03_30/ncnnf0_tag20140330t201621_0.309.843596189';
+ alter database mount; 
+
+crosscheck backup of database;
+ delete noprompt expired backup of database;
+ crosscheck backup of archivelog all;
+ delete noprompt expired backup of archivelog all;
+
+ catalog start with '+DATA1/ora03/backupset/2014_03_30/';
+
+
+ run {
+ set newname for database to '+KDATA';
+ restore database;
+ switch datafile all;
+ recover database;} 
+
+ALTERAR O CAMINHO DOS REDOS
+
+select 'alter database rename file '||''''||member||''''||' to '||''''||'+DATA'||''''||';' from v$logfile;
+
+ ABRIR O BANCO RESETLOGS
+
+alter database open resetlogs
+
+ CRIAR UMA TEMP NOVA, DROPAR AS ANTERIORES
+
+ SHUTDOWN
+
+ STARTUP MOUNT
+
+ USAR O NID
+nid target=sys/oracle@bdprod2 DBNAME=bdprod2
+
+SE DER MERDA!!!!!!!!!
+nid target=sys/oracle@bdprod2 REVERT=Y
+
+ STARTUP NOMOUNT
+
+ ALTER SYSTEM SET DB_NAME=bdprod2 SCOPE=SPFILE;
+
+ ALTER SYSTEM RESET DB_UNIQUE_NAME;
+
+ Shutdown immediate
+ startup mount
+
+ ABRIR O BANCO RESETLOGS
+
+ alter database open resetlogs
