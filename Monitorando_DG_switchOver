@@ -1,0 +1,387 @@
+--################################################################################################--
+--###### Query para acompanhar Status do Dataguard (realizar a consulta dentro do Primary) #######--
+--################################################################################################--
+
+-- Verificar se o Listener de BDFAMA(PRIMARIO) e BDFAMAS(STB) estão OK:
+
+BDFAMA:
+
+lsnrctl status BDFAMA_PRI
+
+BDFAMAS:
+
+lsnrctl status BDFAMA_STB
+
+-- Validar se o ambiente está "pronto" para o switch over
+
+select switchover_status from v$database;
+
+--obs: O RETORNO DEVE SEMPRE SER "SESSIONS ACTIVE" OR "TO STANDBY"
+
+--Verificar se o processo de ARCH e LNS está OK
+
+SELECT PROCESS, STATUS FROM V$MANAGED_STANDBY;
+
+--Retorno Esperado:
+
+PROCESS   STATUS
+--------- ------------
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+LNS       WRITING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CONNECTED
+ARCH      CLOSING
+ARCH      CLOSING
+
+
+--############################################################################################################--
+--###### Query para acompanhar o apply de archives no ambiente STB (realizar a consulta dentro do STB) #######--
+--############################################################################################################--
+
+SELECT ARCH.THREAD# "Thread", ARCH.SEQUENCE# "Last Sequence Received", APPL.SEQUENCE# "Last Sequence Applied", (ARCH.SEQUENCE# - APPL.SEQUENCE#) "Difference"
+FROM
+(SELECT THREAD# ,SEQUENCE# FROM V$ARCHIVED_LOG WHERE (THREAD#,FIRST_TIME ) IN (SELECT THREAD#,MAX(FIRST_TIME) FROM V$ARCHIVED_LOG GROUP BY THREAD#)) ARCH,
+(SELECT THREAD# ,SEQUENCE# FROM V$LOG_HISTORY WHERE (THREAD#,FIRST_TIME ) IN (SELECT THREAD#,MAX(FIRST_TIME) FROM V$LOG_HISTORY GROUP BY THREAD#)) APPL
+WHERE
+ARCH.THREAD# = APPL.THREAD#
+ORDER BY 1;
+
+--Retorno Esperado:
+
+    Thread Last Sequence Received Last Sequence Applied Difference
+---------- ---------------------- --------------------- ----------
+         1                    150                   150          0
+
+SELECT thread#, Max(sequence#) "Last Standby Seq Applied"
+  FROM v$archived_log
+ WHERE applied = 'YES'
+ GROUP BY thread#
+ ORDER BY 1;
+
+--Retorno Esperado:
+
+   THREAD# Last Standby Seq Applied
+---------- ------------------------
+         1                      149
+
+*obs: sempre será 1-2 archives por conta do checkpoint do primary
+
+SELECT PROCESS, STATUS FROM V$MANAGED_STANDBY;
+
+--Retorno Esperado:
+
+PROCESS   STATUS
+--------- ------------
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CONNECTED
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+ARCH      CLOSING
+MRP0      APPLYING_LOG
+
+PROCESS   STATUS
+--------- ------------
+RFS       IDLE
+RFS       IDLE
+
+--RFS = REMOTE FILE SERVER
+
+
+select switchover_status from v$database;
+
+--Retorno Esperado:
+
+SWITCHOVER_STATUS
+--------------------
+NOT ALLOWED
+
+*obs: O RETORNO DEVE SEMPRE SER "NOT ALLOWED" OR "TO PRIMARY"
+
+
+
+--##################################--
+--###### Possíveis problemas #######--
+--##################################--
+
+- Primary não está enviando archives para o Stb:
+
+Validar espaço dos archives destino (X4 diskgroup +RECOC1)
+
+Validado espaço e normalizado, reprocessar o envio:
+
+--Conectar no primary e rodar:
+
+alter system set LOG_ARCHIVE_DEST_STATE_2=DEFER scope=both;
+
+alter system set LOG_ARCHIVE_DEST_STATE_2=ENABLE scope=both;
+
+Acompanhar alert log do Primary e Stb.
+
+- Não está aplicando os archives dentro do STB ou o processo parece "congelado"
+Validar se o MRP está rodando dentro do STB:
+
+select process, thread#, sequence#, status from v$managed_standby where process='MRP0';
+
+--Retorno esperado:
+
+PROCESS      THREAD#  SEQUENCE# STATUS
+--------- ---------- ---------- ------------
+MRP0               1        180 APPLYING_LOG
+
+Ativar o MRP:
+
+alter database recover managed standby database using current logfile disconnect from session;
+
+Obs: o comando ativa o MRP e marca como real-apply (toda alteração é encaminhada para o stb online)
+
+Parar o MRP:
+
+ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+
+
+
+
+--#########################--
+--###### SWITCHOVER #######--
+--#########################--
+ 
+--###########################################--
+--###### Conectar no ambiente Primary #######--
+--###########################################--
+select switchover_status from v$database;
+*obs: O RETORNO DEVE SEMPRE SER "SESSIONS ACTIVE" OR "TO STANDBY"
+
+
+--###########################################--
+--######       verify Switchover      #######--
+--###########################################--
+
+alter database switchover to DBNAME verify;
+
+--########################################################--
+--###### Realizar o switchover de Primary para STB #######--
+--########################################################--
+alter database commit to switchover to standby with session shutdown;
+startup mount;
+select name, database_role, guard_status, open_mode from v$database;
+alter system set LOG_ARCHIVE_DEST_STATE_2=DEFER scope=both;
+--###############################################################################--
+--###### Conectar no ambiente STB, para realizar a conversão para Primary #######--
+--###############################################################################--
+alter database recover managed standby database cancel;
+select switchover_status from v$database;
+*obs: O RETORNO DEVE SEMPRE SER "NOT ALLOWED" OR "TO PRIMARY"
+--######################################################--
+--###### Realizar switchover de STB para Primary #######--
+--######################################################--
+alter database commit to switchover to primary with session shutdown;
+select name,database_role,protection_mode from v$database;
+--################################################--
+--###### Aplicando Dataguard Old Primary #########--
+--################################################--
+ - STDBY (OLD PRI)
+alter database recover managed standby database using current logfile disconnect from session;
+ - PRI (OLD STDBY)
+alter system set LOG_ARCHIVE_DEST_STATE_2=ENABLE scope=both;
+
+--##############################################################--
+--###### Subir novo ambiente (NOVO PRIMARY [ANTIGO STB]) #######--
+--##############################################################--
+--################################################################################################################################################--
+--######   Caso o ambiente seja SingleInstance criar redo e undo para todos os nós, caso contrário seguir para alteração de parâmetros:  ######--
+--######                                                                                                                                    ######--
+--######                                                                                                              ######--
+--######                                                                                      ######--
+--######          ALTER DATABASE ADD LOGFILE THREAD           2 GROUP 201 ('+DATA') size 4G;                    ######--
+--######          ALTER DATABASE ADD LOGFILE THREAD           2 GROUP 202 ('+DATA') size 4G;                                      ######--
+--######          ALTER DATABASE ADD LOGFILE THREAD           2 GROUP 203 ('+DATA') size 4G;                                      ######--
+--######          ALTER DATABASE ADD LOGFILE THREAD           2 GROUP 204 ('+DATA') size 4G;                                      ######--
+--######                                                                                                                                    ######--
+--######          create undo tablespace undotbs2 datafile '+DATA' size 500M autoextend on next 100M maxsize unlimited;           ######--
+--######          create undo tablespace undotbs3 datafile '+DATA' size 500M autoextend on next 100M maxsize unlimited;           ######--
+--######          alter database enable thread 2;                                                                                 ######--
+--######                                                                                                                                    ######--
+--######                                                                                                                                  ######--
+--################################################################################################################################################--
+--####################################################--
+--###### Alterar os parametros do novo PRIMARY #######--
+--####################################################--
+sqlplus / as sysdba
+alter system set cluster_database=TRUE scope=spfile sid='*';
+alter system set cluster_database_instances=2 scope=spfile sid='*';
+alter system set instance_number=1 scope=spfile sid='ora101';
+alter system set instance_number=2 scope=spfile sid='ora102';
+alter system set thread=1 scope=spfile sid='ora101';
+alter system set thread=2 scope=spfile sid='ora102';
+alter system set undo_tablespace='UNDOTBS1' scope=spfile sid='ora101';
+alter system set undo_tablespace='UNDOTBS2' scope=spfile sid='ora102';
+alter system set local_listener='(ADDRESS=(PROTOCOL=TCP)(HOST=172.27.1.126)(PORT=1521))' scope=spfile sid='ora101';
+alter system set local_listener='(ADDRESS=(PROTOCOL=TCP)(HOST=172.27.1.127)(PORT=1521))' scope=spfile sid='ora102';
+alter system set remote_listener='(ADDRESS = (PROTOCOL = TCP)(HOST = krtndev1-scan)(PORT = 1521))' scope=both sid='ora101';
+alter system set remote_listener='(ADDRESS = (PROTOCOL = TCP)(HOST = krtndev1-scan)(PORT = 1521))' scope=both sid='ora102';
+alter system set service_names='ora10' sid='*' scope=both;
+--####################################################--
+--######   Realizar configuração no Cluster   #######--
+--####################################################--
+sqlplus / as sysdba
+--####################################################--
+--######       Criar novo pfile          #######--
+--####################################################--
+create pfile='/home/oracle/spfileora10.ora' from spfile;
+shutdown immediate;
+--####################################################--
+--###### Criar diretório audit em todos os nós #######--
+--####################################################--
+ssh oracle@hlgsvsporadb02 mkdir -p /u01/app/oracle/admin/ora10/adump
+--####################################################--
+--######     Exportar ORACLE_SID=ora101     #######--
+--######     Recriar o spfile         #######--
+--####################################################--
+sqlplus / as sysdba
+create spfile='+DATA/ora10/spfileora10.ora' from pfile='/home/oracle/spfileora10.ora';
+--####################################################--
+--###### Alterar spfile para ler dentro do ASM #######--
+--####################################################--
+srvctl add database -d ora10 -o $ORACLE_HOME -p +DATA/ora10/spfileora10.ora
+--####################################################--
+--######      Adicionar Instance          #######--
+--####################################################--
+srvctl add instance -i ora101 -n hlgsvsporadb01 -d ora10
+srvctl add instance -i ora102 -n hlgsvsporadb02 -d ora10
+--####################################################--
+--######        Criar INIT            #######--
+--####################################################--
+cd $ORACLE_HOME/dbs
+vi initora101.ora
+SPFILE='+DATA/ora10/spfileora10.ora'
+--####################################################--
+--######   Copiar para todos os nós       #######--
+--####################################################--
+scp initora101.ora oracle@hlgsvsporadb02:/u01/app/oracle/product/12.1.0.2/dbhome_1/dbs/initora102.ora
+--####################################################--
+--######       Copiar orapw            #######--
+--####################################################--
+mv orapwora10 orapwora101
+scp orapwora101 oracle@hlgsvsporadb02:/u01/app/oracle/product/12.1.0.2/dbhome_1/dbs/orapwora102
+--####################################################--
+--######       Subir ambiente            #######--
+--####################################################--
+srvctl start database -d ora10
+alter system switch all logfile;
+alter system checkpoint;
+--####################################################--
+--######   Apagar os REDO standby criados     #######--
+--####################################################--
+sqlplus / as sysdba
+select 'alter database drop standby logfile group '||group#||';' from v$logfile where type='STANDBY';
+--#########################################################--
+--###### Alterar ambiente para não subir em Cluster #######--
+--#########################################################--
+alter system set cluster_database=FALSE scope=spfile;
+exit;
+--#########################################################--
+--######          Parar o ambiente               #######--
+--#########################################################--
+srvctl stop database -d ora10
+--#########################################################--
+--######          Utilizar o NID               #######--
+--#########################################################--
+sqlplus / as sysdba
+startup mount
+exit:
+--#########################################################--
+--######          Executar NID                 #######--
+--#########################################################--
+nid target=sys/gWGvJcsTyQIa DBNAME=ora10
+--#########################################################--
+--######   Após concluido, subir ambiente         #######--
+--#########################################################--
+sqlplus / as sysdba
+STARTUP NOMOUNT;
+ALTER SYSTEM RESET DB_NAME;
+ALTER SYSTEM SET DB_NAME=ora10 SCOPE=spfile ;
+alter system set cluster_database=true scope=spfile;
+alter system set use_large_pages=ONLY sid='*' scope=spfile;
+alter system reset  LOG_ARCHIVE_CONFIG scope=spfile;
+alter system reset  LOG_ARCHIVE_DEST_1 scope=spfile;
+alter system reset  LOG_ARCHIVE_DEST_2 scope=spfile;
+alter system reset  LOG_ARCHIVE_DEST_STATE_2 scope=spfile;
+alter system reset  LOG_ARCHIVE_MAX_PROCESSES scope=spfile;
+alter system reset  REMOTE_LOGIN_PASSWORDFILE scope=spfile;
+alter system reset  standby_file_management scope=spfile;
+alter system reset  FAL_SERVER scope=spfile;
+alter system reset  FAL_CLIENT scope=spfile;
+alter system set cluster_database_instances=2 scope=spfile;
+alter system set log_archive_dest_1='LOCATION=+FRA' scope=both sid='*';
+alter system set log_archive_format='archive_%D_%t_%s_%r.arc' scope=spfile sid='*';
+alter system set filesystemio_options=SETALL scope=spfile sid='*';
+shutdown immediate;
+startup mount;
+--#########################################################--
+--######   Alterar ambiente para ARCHIVELOG         #######--
+--#########################################################--
+alter database archivelog;
+alter database open resetlogs;
+shutdown immediate;
+--#####################################################################--
+--######      Recriar TODOS REDOS com 4G e multiplexados     #######--
+--#####################################################################--
+col GROUP# for 999
+col THREAD# for 999
+col MEMBER for a70
+set lines 800
+SELECT a.GROUP#, a.THREAD#,a.ARCHIVED, a.STATUS, b.MEMBER, a.BYTES/1024/1024 FROM V$LOG a, v$logfile b where a.GROUP#=b.GROUP# order by 2,1;
+alter system switch logfile ;
+alter system checkpoint ;
+alter database disable thread 2;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 1 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 2 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 3 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 4 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 5 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 6 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 7 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 8 ('+RECO','+FRA') size 4096m;
+ALTER DATABASE DROP LOGFILE GROUP
+alter database enable thread 2;
+--############################################################################################################################--
+--######                       OPCIONAL -   Coleta de estatísticas                                                      ######--
+--######                    ALTER SESSION FORCE PARALLEL DDL PARALLEL    8;                                             ######--
+--######                    ALTER SESSION FORCE PARALLEL DML PARALLEL    8;                                             ######--
+--######                    ALTER SESSION FORCE PARALLEL QUERY PARALLEL  8;                                             ######--
+--######                                                                                                                ######--
+--######                    begin DBMS_STATS.gather_dictionary_stats;end;                                               ######--
+--######                    /                                                                                           ######--
+--######                                                                                                                ######--
+--######                    begin DBMS_STATS.gather_system_stats;end;                                                   ######--
+--######                    /                                                                                           ######--
+--######                                                                                                                ######--
+--######                    begin DBMS_STATS.GATHER_FIXED_OBJECTS_STATS;end;                                            ######--
+--######                    /                                                                                           ######--
+--######                                                                                                                ######--
+--######                    begin dbms_stats.gather_system_stats('EXADATA');end;                                        ######--
+--######                    /                                                                                           ######--
+--######                                                                                                                ######--
+--############################################################################################################################--
+
+
+Active Dataguard:
+
+SHUTDOWN IMMEDIATE;
+STARTUP MOUNT;
+ALTER DATABASE OPEN READ ONLY;
+ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DISCONNECT FROM SESSION;
+
+#####################################################
+
+
