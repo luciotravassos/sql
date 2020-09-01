@@ -1,0 +1,195 @@
+./crsctl status resource -t
+
+Check current scan listener status:$ srvctl status scan_listener
+SCAN Listener LISTENER_SCAN1 is enabled
+SCAN listener LISTENER_SCAN1 is running on node grac2
+SCAN Listener LISTENER_SCAN2 is enabled
+SCAN listener LISTENER_SCAN2 is not running
+SCAN Listener LISTENER_SCAN3 is enabled
+SCAN listener LISTENER_SCAN3 is running on node grac2
+
+Restart scan Listener LISTENER_SCAN2: $ srvctl start scan_listener -i 2
+
+Verify new SCAN listener status:$ srvctl status scan_listener
+SCAN Listener LISTENER_SCAN1 is enabled
+SCAN listener LISTENER_SCAN1 is running on node grac2
+SCAN Listener LISTENER_SCAN2 is enabled
+SCAN listener LISTENER_SCAN2 is running on node grac1
+SCAN Listener LISTENER_SCAN3 is enabled
+SCAN listener LISTENER_SCAN3 is running on node grac2
+
+
+
+
+
+STOP SEQUENCE
+
+COMMAND                                  DESCRIPTION
+------------------------------------------------------------------------------------------
+srvctl stop database -d ORCL                  STOP DATABASE
+srvctl stop instance -d ORCL -i ORCL1         STOP first INSTANCE (skip it if running 'stop database' as that will stop both instances)
+srvctl stop instance -d ORCL -i ORCL2         STOP second INSTANCE (skip it if running 'stop database' as that will stop both instances)
+srvctl stop asm -n NODE1                      STOP ASM INSTANCES on NODE 1 (In 11G , we have OCR on ASM so we cannot stop ASM, but if you have OCR in NON-ASM you should stop it)
+srvctl stop asm -n NODE2                      STOP ASM INSTANCES on NODE 2 (In 11G , we have OCR on ASM so we cannot stop ASM, but if you have OCR in NON-ASM you should stop it)
+srvctl stop nodeapps -n NODE1                 STOP NODEAPPS  on NODE 1
+srvctl stop nodeapps -n NODE2                 STOP NODEAPPS  on NODE 2
+/etc/init.d/init.crs stop                     STOP CRS PROCESSES (AS ROOT USER)
+
+START SEQUENCE
+
+COMMAND                                      DESCRIPTION
+-------------------------------------------------------------------------------------------
+/etc/init.d/init.crs start                  START CRS PROCESS (AS ROOT USER)
+srvctl start asm -n NODE1                   START ASM INSTANCE on node 1
+srvctl start asm -n NODE2                   START ASM INSTANCE on node 2
+srvctl start database -d ORCL               START DATABASE
+srvctl start instance -d ORCL -i ORCL1      START first INSTANCE (skip it if running 'start database' as that will start both instances)
+srvctl start instance -d ORCL -i ORCL2      START second INSTANCE (skip it if running 'start database', as taht will start both instances)
+srvctl start nodeapps -n NODE1              START NODEAPPS on NODE1
+srvctl start nodeapps -n NODE2              START NODEAPPS ON NODE2
+
+OTHER USEFUL COMMANDS
+
+COMMAND                                      DESCRIPTION
+---------------------------------------------------------------------
+crsctl status resource -t                    Clusterware Resource Status Check
+srvctl status database -d ORCL               STATUS OF DATABASE
+srvctl stop listener -l LISTENER_NAME        STOP A LISTENER
+srvctl start listener -l LISTENER_NAME       START A LISTENER
+crsctl stop has                              stop all the clusterware services/ resources on specific node (including DB and listener) (run as root)
+crsctl start has                             start all the clusterware services/ resources on specific node (including DB and listener) (run as root)
+crsctl stop cluster -all                     to stop csr services on all nodes of clusterware (run as root)
+crsctl start cluster -all                    to start crs services on all nodes of clusterware (run as root)
+crsctl check has                             to check if ohasd is running/ stopped (run as root)
+crsctl enable has                            enable Oracle High Availability Services autostart (run as root)
+crsctl disable has                           disable Oracle High Availability Services autostart (run as root)
+crsctl config has                            check if Oracle High Availability Services autostart is enabled/ disabled (run as root)
+srvctl status nodeapps                       to check the status of services on all nodes
+crsctl stop crs                              stop all the clusterware servi
+crsctl start crs                             start all the clusterware services/ resources ON THAT NODE! (run as root)
+cluvfy comp scan -verbose                    Verifying scan
+status scan_listener                         Verifying scan
+srvctl config scan_listener                  Verifying scan port
+srvctl relocate scan -i 1 -n NODE1           Relocate scan listener 1 to the mentioned node
+
+CRSCTL Command Syntax Overview
+CRSCTL command has
+
+Command
+
+Description
+
+check
+
+Displays the Oracle Restart status.
+
+config
+
+Displays the Oracle Restart configuration.
+
+disable
+
+Disables automatic restart of Oracle Restart.
+
+enable
+
+Enables automatic restart of Oracle Restart.
+
+start
+
+Starts Oracle Restart.
+
+stop
+
+Stops Oracle Restart.
+
+1) Do not use CRSCTL commands on Oracle entities (such as resources, resource types, and server pools) that have names beginning with ora unless you are directed to do so by Oracle Support. The Server Control utility (SRVCTL) is the correct utility to use on Oracle entities.
+2) in order to run crsctl command you must be connected as oracle user (for Linux, AIX, Unix servers)
+3)  There are 3 categories of CRSCTL commands:
+a)Dual Environment CRSCTL Commands
+The following lists the various crsctl commands and their functions are available for both Oracle RAC and Oracle Restart environments:
+crsctl add resource
+crsctl add type
+crsctl check css
+crsctl delete resource
+crsctl delete type
+crsctl get hostname
+crsctl getperm resource
+crsctl getperm type
+crsctl modify resource
+crsctl modify type
+crsctl setperm resource
+crsctl setperm type
+crsctl start resource
+crsctl status resource
+crsctl status type
+crsctl stop resource
+b)Oracle RAC Environment CRSCTL Commands. The commands listed in this section manage the Oracle Clusterware stack in an Oracle RAC environment, which consists of the following:
+- Oracle Clusterware, the member nodes and server pools
+- Oracle ASM (if installed)
+- Cluster Synchronization Services
+- Cluster Time Synchronization Services
+crsctl add crs administrator
+crsctl add css votedisk
+crsctl add serverpool
+crsctl check cluster
+crsctl check crs
+crsctl check resource
+crsctl check ctss
+crsctl config crs
+crsctl delete crs administrator
+crsctl delete css votedisk
+crsctl delete node
+crsctl delete serverpool
+crsctl disable crs
+crsctl enable crs
+crsctl get css
+crsctl get css ipmiaddr
+crsctl get nodename
+crsctl getperm serverpool
+crsctl lsmodules
+crsctl modify serverpool
+crsctl pin css
+crsctl query crs administrator
+crsctl query crs activeversion
+crsctl query crs releaseversion
+crsctl query crs softwareversion
+crsctl query css ipmidevice
+crsctl query css votedisk
+crsctl relocate resource
+crsctl relocate server
+crsctl replace discoverystring
+crsctl replace votedisk
+crsctl set css
+crsctl set css ipmiaddr
+crsctl set css ipmiadmin
+crsctl setperm serverpool
+crsctl start cluster
+crsctl start crs
+crsctl status server
+crsctl status serverpool
+crsctl stop cluster
+crsctl stop crs
+crsctl unpin css
+crsctl unset css
+
+     c)Oracle Restart Environment CRSCTL Commands:
+        These commands only impact the cluster node that they are run on
+
+- Oracle High Availability Services daemon (ohasd)
+- Oracle ASM
+- Cluster Synchronization Services (OSS) if ASM is installed
+
+crsctl check has
+crsctl config has
+crsctl disable has
+crsctl enable has
+crsctl query has releaseversion
+crsctl query has softwareversion
+crsctl start has
+crsctl stop has
+
+
+srvctl modify listener -l MONITORING -endpoints "TCP:1521"
+
+srvctl add listener -l MONITORING -o /u01/app/oracle/product/12.1.0.2/dbhome_1 -p 1555
