@@ -1,0 +1,170 @@
+ 1- Colocar o banco SOURCE em MOUNT
+
+ #shutdown immediate
+
+ #startup mount
+
+   
+
+ 2- Realizar o Backup
+
+ #rman target /
+
+ ##Validar Syntax##
+
+ #rman checksyntax
+
+ #BACKUP AS COMPRESSED BACKUPSET DATABASE INCLUDE CURRENT CONTROLFILE;
+
+ Rodar o comando acima
+
+ 3- Criar nova base
+
+ DBCA
+
+ 4- Colocar o banco TARGET em nomount
+
+ #shutdown immediate
+
+ #startup nomount
+ #alter system set db_name='SOURCE' scope=spfile
+
+ Alter system set db_name='bdprodts' scope=spfile;
+
+ #alter system set db_unique_name='TARGET' scope=spfile;
+
+ alter system set db_unique_name='bdprod' scope=spfile;
+
+ 5- Colocar o banco em modo MOUNT (target)
+
+ #alter database mount
+
+ #shutdown immediate
+
+ #startup nomount
+
+ 6- Acessar RMAN target / para início do restore/recovery
+ Para restaurar o ControlFile
+
+ #rman target /
+
+ #list backup of controlfile
+
+ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+ ------- ---- -- ---------- ----------- ------------ ---------------
+ 104     Full    25.89M     DISK        00:00:10     23-APR-14
+         BP Key: 104   Status: AVAILABLE  Compressed: NO  Tag: TAG20140423T173803
+ ->>        Piece Name: /export/bdbi/backup/rman/cf_c-1008860695-20140423-00.cf
+   Control File Included: Ckp SCN: 114016058483   Ckp time: 23-APR-14
+
+ #restore spfile from 
+ #restore controlfile from '/BKP2/c-1720136141-20140215-00';
+
+ #alter database mount;
+
+ 7- Limpeza do conteudo das informações antigas do backups no controlfile restaurado.
+
+ #crosscheck backup of database;
+
+ #delete noprompt expired backup of database;
+
+ #crosscheck backup of archivelog all;
+
+ #delete noprompt expired backup of archivelog all;
+
+ 8- Catalogar os backups
+
+ #catalog start with '/export/bdbi/backup/rman';
+ Yes
+
+ 9- Realizando o restore:
+
+ run {
+ set newname for database to '+DATA1';
+ restore database;
+ switch datafile all;
+ recover database;}
+
+ !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ !!!!ALTERAR O CAMINHO DOS REDOS!!!!
+ !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ Acessar o banco source para verificar o caminho do REDO:
+
+ #select member from v$logfile:
+ +CONTROLREDO/bi/onlinelog/group_3.272.814464093
+ +CONTROLREDO1/bi/onlinelog/group_3.271.814464093
+ +CONTROLREDO2/bi/onlinelog/group_3.271.814464093
+ +CONTROLREDO/bi/onlinelog/group_2.271.814464093
+ +CONTROLREDO1/bi/onlinelog/group_2.270.814464093
+ +CONTROLREDO2/bi/onlinelog/group_2.270.814464093
+ +CONTROLREDO/bi/onlinelog/group_1.270.814464091
+ +CONTROLREDO1/bi/onlinelog/group_1.269.814464091
+ +CONTROLREDO2/bi/onlinelog/group_1.269.814464091
+ +CONTROLREDO/bi/onlinelog/group_4.261.827929301
+ +CONTROLREDO1/bi/onlinelog/group_4.261.827929301
+ +CONTROLREDO2/bi/onlinelog/group_4.262.827929301
+ +CONTROLREDO/bi/onlinelog/group_5.262.827929343
+ +CONTROLREDO1/bi/onlinelog/group_5.262.827929343
+ +CONTROLREDO2/bi/onlinelog/group_5.263.827929343
+
+ select 'alter database rename file '||''''||member||''''||' to '||''''||'+DATA1'||''''||';' from v$logfile;
+
+ alter database rename file '+CONTROLREDO/bi/onlinelog/group_3.272.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO1/bi/onlinelog/group_3.271.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO2/bi/onlinelog/group_3.271.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO/bi/onlinelog/group_2.271.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO1/bi/onlinelog/group_2.270.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO2/bi/onlinelog/group_2.270.814464093' to '+DATA1';
+ alter database rename file '+CONTROLREDO/bi/onlinelog/group_1.270.814464091' to '+DATA1';
+ alter database rename file '+CONTROLREDO1/bi/onlinelog/group_1.269.814464091' to '+DATA1';
+ alter database rename file '+CONTROLREDO2/bi/onlinelog/group_1.269.814464091' to '+DATA1';
+ alter database rename file '+CONTROLREDO/bi/onlinelog/group_4.261.827929301' to '+DATA1';
+ alter database rename file '+CONTROLREDO1/bi/onlinelog/group_4.261.827929301' to '+DATA1';
+ alter database rename file '+CONTROLREDO2/bi/onlinelog/group_4.262.827929301' to '+DATA1';
+ alter database rename file '+CONTROLREDO/bi/onlinelog/group_5.262.827929343' to '+DATA1';
+ alter database rename file '+CONTROLREDO1/bi/onlinelog/group_5.262.827929343' to '+DATA1';
+ alter database rename file '+CONTROLREDO2/bi/onlinelog/group_5.263.827929343' to '+DATA1';
+
+ 10- Fazer shutdown na base source:
+
+ #shutdown immediate;
+
+ 11- Verificar TNSNAMES da base TARGET
+ Caso não existe criar TNSNAMES com o SID = bidev (ps -ef | grep -i pmon)
+
+ 12- Realizar NID
+
+ nid target=sys/oracle@bidev DBNAME=bidev
+
+ !!!!Se der merda!!!
+
+ nid target=sys/oracle@bidev REVERT=Y
+
+
+ 13- Rename db_names target
+
+ shutdown immediate;
+
+ startup nomount;
+
+ Alter system set db_name='bidev' scope=spfile;
+
+ alter system reset db_unique_name;
+
+ alter database open resetlogs;
+
+ (SE DER ESSE ERRO:
+ORA-00312: online log 3 thread 1: '+data1'
+
+
+ SQL> alter database clear unarchived logfile group 3;
+  
+
+)
+
+14- Recriar TEMPs
+
+ create temporary tablespace TEMP3 tempfile '+DATA1' size 32G;
+ alter database default temporary tablespace TEMP3;
+
+ drop tablespace TEMP including contents and datafiles; 
