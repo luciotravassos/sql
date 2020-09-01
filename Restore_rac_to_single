@@ -1,0 +1,87 @@
+ Target:
+
+ BDSIGA
+
+ 1 - Instalar os pacotes do SO
+
+ 2 - Apresentar as luns para o servidor target
+
+ 3 - Reconhecer (formatar) as luns no server target
+
+ 4 - Configurar o oracleasmlib
+
+ 5 - Criar os discos no ORACLEASMLIB (scan, create, list)
+
+ 6 - Rebootar o server para ver se os asmlib sobe automaticamente (listdisk)
+
+ 7 - Vai ter um BUG!!
+
+ Se tiver o bug onde o ASM não reconhece os discos, faça o seguinte:
+
+ Edit your oracleasm config file under /etc/sysconfig/oracleasm to something like below
+
+ ORACLEASM_SCANORDER="dm"
+ ORACLEASM_SCANEXCLUDE="sd"
+
+ And reboot the node again
+
+ 8 - Instalar o grid
+
+ 9 - Criar os diskgroups
+
+ 10 - Instalar o database
+
+ 11 - Vai ter um bug!!! (não criar com 4K, crie com 512KB)
+
+ 12 - Criar o banco
+
+ 13 - Copiar o backup para o target e descompactar no local '/tmp/bkp/'
+
+ 14 - Definir as variáveis de ambiente de so para o DB
+ . oraenv
+ BDSIGA
+ ou veja no /etc/oratab
+
+ 15 - Catalogar os backups
+ Acessar o rman (rman target /)
+
+ RMAN> catalog start with '/export/201312212212/';
+ RMAN> catalog start with '/tmp/bkp/';
+ RMAN> list backup of controlfile; 
+RMAN> list backup of database;
+RMAN> list backup of archivelog all
+
+ 16 - Monta o banco (shutdown, depois startup mount)
+
+ 17 - Executar no RMAN:
+
+ -- Se tiver necessidade:
+
+ Coloque o banco em nomount, restaure o backup do controlfile:
+
+ run{
+ restore controlfile from (caminho que o comando list backup of controlfile
+ alter database mount;}
+
+crosscheck backup of database all;
+ delete noprompt expired backup of database.
+ crosscheck backup of archivelog all;
+ delete noprompt expired backup of archivelog all;
+
+ run{
+ allocate channel c1 device type disk;
+ allocate channel c2 device type disk;
+ allocate channel c3 device type disk;
+ allocate channel c4 device type disk;
+ set newname for database to '+DATA';
+ restore database;
+ switch datafile all;
+recover database;
+ alter database open resetlogs;
+ release channel c1;
+ release channel c2;
+ release channel c3;
+ release channel c4;
+ }
+
+18 - Subir a instância e testar!!!
