@@ -1,0 +1,25 @@
+-- Copiar init ora e password file para todos os nós
+-- renomear com o sid da cada instância
+-- criar o diretório adump conforme parametro no spfile
+-- Alterar os parâmetros de cluster.
+
+alter system set cluster_database=TRUE scope=spfile;
+alter system set cluster_database_instances=3 scope=spfile;
+alter system set instance_number=1 scope=spfile sid='bdviradaexa1';
+alter system set instance_number=2 scope=spfile sid='bdviradaexa2';
+alter system set instance_number=3 scope=spfile sid='bdviradaexa3';
+alter system reset cluster_interconnects  scope=spfile sid='*';
+alter system set cluster_interconnects='192.168.10.1:192.168.10.2' scope=spfile sid='bdviradaexa1';
+alter system set cluster_interconnects='192.168.10.3:192.168.10.4' scope=spfile sid='bdviradaexa2';
+alter system set cluster_interconnects='192.168.10.5:192.168.10.6' scope=spfile sid='bdviradaexa3';
+alter system set local_listener='(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=172.16.136.242)(PORT=1521))))' scope=both sid='bdviradaexa1';
+alter system set local_listener='(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=172.16.136.244)(PORT=1521))))' scope=both sid='bdviradaexa2';
+alter system set local_listener='(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=172.16.136.246)(PORT=1521))))' scope=both sid='bdviradaexa3';
+
+-- Adicionar os serviços
+
+srvctl add database -d bdvirada -o $ORACLE_HOME -p +DATAC1/bdvirada/spfilebdpvirada.ora
+srvctl add instance -d bdvirada -i bdvirada1 -n krtn1dbadm01
+srvctl add instance -d bdvirada -i bdvirada2 -n krtn1dbadm02
+srvctl add instance -d bdvirada -i bdvirada3 -n krtn1dbadm03
+srvctl modify database -d bdvirada -a DATAC1,RECOC1
