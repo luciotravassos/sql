@@ -1,0 +1,11 @@
+- Todos os nós
+
+ crsctl stat res -t 
+
+
+- Por nó
+crsctl stat res -t -init 
+
+
+
+If you’re running RAC, you should use ‘crsctl stop crs’ to stop *everything* (including OHASD) on the local node that you’re logged into. Note that there is no option to do this remotely, since OHASD is the daemon that provides the remote startup/shutdown stuff. If you run ‘crsctl stop cluster’, you’ll stop everything *except* OHASD, and, optionally, you can do that for any/all remote nodes as well as the local node. Because OHASD remains up and running, you can restart stuff on remote nodes. Finally, ‘crsctl stop has’ is for stopping everything (including OHASD) on a single-instance database that’s managed by Oracle Restart.
