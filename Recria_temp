@@ -1,0 +1,83 @@
+Faça com atenção pois estou mandando o procedimento de cabeça aqui, rs:
+1 - Consulte o tamanho da tablespace (select sum(bytes)/1024/1024/1024 from dba_temp_files where tablespace='NOMEDATABLESPACETEMP';)
+2 - Crie uma nova tablespace temporária com um nome diferente da atual (Create temporary tablespace temp2 tempfile 'CAMINHO' SIZE 2000M autoextend off EXTENT MANAGEMENT LOCAL UNIFORM SIZE 1M;)
+3 - Altere a tablespace temporário default do banco (alter database default temporary tablespace temp2;)
+4 - Remova a tablespace anterior (drop tablespace temp including contents and datafiles;)
+5 - Se quiser deixar com o novo nome, pare aqui. Se quiser colocar o nome original, refaça os passos 1,2,3 e 4 com o novo nome.
+
+alter tablespace YOUR_TEMP_TABLESPACE_NAME shrink space keep 256M;
+
+set lines 1500
+set pages 1000
+COLUMN property_name FORMAT A30
+COLUMN property_value FORMAT A30
+COLUMN description FORMAT A50
+SET LINESIZE 200
+
+SELECT *
+FROM database_properties
+WHERE property_name like '%TABLESPACE';
+
+select 'alter user '||username||' TEMPORARY TABLESPACE TEMP;' from dba_users where TEMPORARY_TABLESPACE ='TEMP2';
+- Quando a TableSpace TEMPORARIA está muito cheia, o ideal é recria-lá.
+1. Verificar se A TEMP está sendo usada.
+
+select tablespace, username from v$sort_usage;
+
+2.  Para ver o caminho dos datafile
+
+select name from v$datafile;
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+3) Criar TEMP2
+
+CREATE TEMPORARY TABLESPACE temp2
+TEMPFILE ‘/u02/oradata/TESTDB/temp2_01.dbf’ SIZE 500M REUSE
+AUTOEXTEND ON NEXT 1M MAXSIZE unlimited
+EXTENT MANAGEMENT LOCAL UNIFORM SIZE 1M;
+
+Tablespace created.
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+4) Deixar TEMP2 como Padrão.
+
+ALTER DATABASE DEFAULT TEMPORARY TABLESPACE temp2;
+
+Database altered.
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+5) Excluir a TEMP em que está cheia.
+
+DROP TABLESPACE temp INCLUDING CONTENTS AND DATAFILES;
+
+Tablespace dropped.
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+6) Recriar a TEMP.
+
+CREATE TEMPORARY TABLESPACE temp
+TEMPFILE ‘/u02/oradata/TESTDB/temp01.dbf’ SIZE 500M REUSE
+AUTOEXTEND ON NEXT 100M MAXSIZE unlimited
+EXTENT MANAGEMENT LOCAL UNIFORM SIZE 1M;
+
+Tablespace created.
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+7) Deixar a TEMP como padrão.
+
+ALTER DATABASE DEFAULT TEMPORARY TABLESPACE temp;
+
+Database altered.
+
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+8) Excluir a TEMP2.
+
+DROP TABLESPACE temp2 INCLUDING CONTENTS AND DATAFILES;
+
+Tablespace dropped
