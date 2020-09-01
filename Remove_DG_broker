@@ -1,0 +1,199 @@
+Before removing the configuration here is the broker configuration and the archive log destination in primary database.
+
+Primary database:
+
+DGMGRL> show configuration
+
+Configuration - db.ipx.com
+
+  Protection Mode: MaxPerformance
+
+  Databases:
+
+    db1_dg - Primary database
+
+    db2_dg - Physical standby database
+
+ 
+
+Fast-Start Failover: DISABLED
+
+Configuration Status:
+
+SUCCESS
+
+ 
+
+SQL> select dest_id,destination,status
+             from v$archive_dest
+
+              where target='STANDBY'
+
+DEST_ID
+DESTINATION
+STATUS
+2
+(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=stagedb1.xyz.com)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=db2_dg.ipx.com)(SERVER=DEDICATED)))
+VALID
+
+ 
+
+1. Remove broker configuration from DGMGRL command line using sys user from primary database
+
+Primary Database:
+
+[oracle@stagedb1 dbs]$ dgmgrl
+
+DGMGRL for Linux: Version 11.2.0.2.0 - 64bit Production
+
+Copyright (c) 2000, 2009, Oracle. All rights reserved.
+
+Welcome to DGMGRL, type "help" for information.
+
+DGMGRL> connect sys/password
+
+Connected.
+
+ 
+
+DGMGRL> remove configuration;
+
+Removed configuration
+
+ 
+
+DGMGRL> show configuration;
+
+Error:
+
+ORA-16532: Data Guard broker configuration does not exist
+
+Configuration details cannot be determined by DGMGRL
+
+ 
+
+2. In primary database set the db_broker_start parameter false.
+
+Primary Database:
+
+SQL> show parameter dg_broker
+
+NAME                                 TYPE                              VALUE
+
+------------------------------------ --------------------------------- ------------------------------
+
+dg_broker_config_file1               string                            /holding/db1/standbylog/dr1ts m1_dg.dat
+
+dg_broker_config_file2               string                            /holding/db1/standbylog/dr2db1_dg.dat
+
+dg_broker_start                      boolean                           TRUE
+
+ 
+
+SQL> alter system set dg_broker_start=false scope=both;
+
+System altered.
+
+ 
+
+SQL> show parameter dg_broker
+
+NAME                                 TYPE                              VALUE
+
+------------------------------------ --------------------------------- ------------------------------
+
+dg_broker_config_file1               string                            /holding/db1/standbylog/dr1ts m1_dg.dat
+
+dg_broker_config_file2               string                            /holding/db1/standbylog/dr2db1_dg.dat
+
+dg_broker_start                      boolean                           FALSE
+
+ 
+
+3. Check the archive log destination in primary database. After removing the configuration it will clear automatically.
+
+Primary Database:
+
+SQL> select dest_id,destination,status
+            from v$archive_dest
+
+ where target='STANDBY'
+
+DEST_ID
+DESTINATION
+STATUS
+2
+ 
+INACTIVE
+
+If it is not clear then make the destination defer
+
+ 
+SQL> alter system set log_archive_dest_state_2=defer scope=both;
+System altered.
+
+ 
+
+4. In standby database set the db_broker_start parameter false.
+
+Secondary Database:
+
+SQL> alter system set dg_broker_start=false scope=both;
+
+System altered.
+
+ 
+
+5. In both primary and standby database remove broker configuration file.
+
+Primary Database:
+
+SQL>  select name , value from v$parameter where name like '%dg_broker%';
+
+ 
+
+Name
+VALUE
+dg_broker_start
+FALSE
+dg_broker_config_file1
+/holding/db1/standbylog/dr1db1_dg.dat
+dg_broker_config_file2
+/holding/db1/standbylog/dr2db1_dg.dat
+
+
+
+[oracle@stagedb1]$ mv /holding/db1/standbylog/dr1db1_dg.dat /holding/db1/standbylog/dr1db1_dg_back.dat
+
+[oracle@stagedb1]$
+
+[oracle@stagedb1]$ mv /holding/db1/standbylog/dr2db1_dg.dat /holding/db1/standbylog/dr2db1_dg_back.dat
+
+ 
+
+Secondary Database:
+
+SQL>  select name , value from v$parameter where name like '%dg_broker%';
+
+ 
+
+Name
+VALUE
+dg_broker_start
+FALSE
+dg_broker_config_file1
+/holding/db2/standbylog/dr1db2_dg.dat
+dg_broker_config_file2
+/holding/db2/standbylog/dr2db2_dg.dat
+
+ 
+
+[oracle@stagedb1]$ mv /holding/db2/standbylog/dr1db2_dg.dat /holding/db2/standbylog/dr1db2_dg_back_20140430.dat
+
+[oracle@stagedb1]$
+
+[oracle@stagedb1]$ mv /holding/db2/standbylog/dr2db2_dg.dat /holding/db2/standbylog/dr2db2_dg_back.dat
+
+
+
+Oracle Support Doc ID: 261336.1
