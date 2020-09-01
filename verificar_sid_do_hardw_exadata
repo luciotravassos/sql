@@ -1,0 +1,13 @@
+ipmitool sunoem cli 'show /SP system_identifier'
+
+
+
+
+Como root:
+
+[root@xpto ~]# ipmitool sunoem cli 'show /SP system_identifier'
+[root@xpto ~]# imageinfo
+[root@xpto ~]# cat /proc/cpuinfo | grep processor | wc -l
+[root@xpto ~]# cat /proc/cpuinfo | grep "model name" | head -1
+[root@xpto ~]# cd /opt/oracle.SupportTools ou [root@xpto ~]# cd /opt/oracle.SupportTools/onecommand
+[root@xpto ~]# grep -i MACHINETYPES databasemachine.xml
