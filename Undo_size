@@ -1,0 +1,393 @@
+-- Tamanho Undo Atual
+SELECT SUM(a.bytes) "UNDO_SIZE"
+FROM v$datafile a,
+v$tablespace b,
+dba_tablespaces c
+WHERE c.contents = 'UNDO'
+AND c.status = 'ONLINE'
+AND b.name = c.tablespace_name
+AND a.ts# = b.ts#;
+
+-- Blocos de UNDO por Seg.
+SELECT MAX(undoblks/((end_time-begin_time)*3600*24))
+"UNDO_BLOCK_PER_SEC"
+FROM v$undostat;
+
+
+--Tamanho do Bloco 
+SELECT TO_NUMBER(value) "DB_BLOCK_SIZE [KByte]"
+FROM v$parameter
+WHERE name = 'db_block_size';
+
+
+-- Select Calcula tamanho UNDO ideal
+SELECT d.undo_size/(1024*1024) "ACTUAL UNDO SIZE [MByte]",
+SUBSTR(e.value,1,25) "UNDO RETENTION [Sec]",
+(TO_NUMBER(e.value) * TO_NUMBER(f.value) *
+g.undo_block_per_sec) / (1024*1024)
+"NEEDED UNDO SIZE [MByte]"
+FROM (
+SELECT SUM(a.bytes) undo_size
+FROM v$datafile a,
+v$tablespace b,
+dba_tablespaces c
+WHERE c.contents = 'UNDO'
+AND c.status = 'ONLINE'
+AND b.name = c.tablespace_name
+AND a.ts# = b.ts#
+) d,
+v$parameter e,
+v$parameter f,
+(
+SELECT MAX(undoblks/((end_time-begin_time)*3600*24))
+undo_block_per_sec
+FROM v$undostat
+) g
+WHERE e.name = 'undo_retention'
+     Abaixo vou mostrar os passos para configurar um UNDO Tablespace para reter e garantir a retenção dos dados (de transações finalizadas) por 1 semana (configuração normalmente que eu aplico nos BDs de produção que eu administro):
+
+Passo 1: Aumentando o período de retenção
+     Para aumentar o período de retenção para guardar os dados pelo período de 1 semana, conecte-se no SQL Plus ou ferramenta de sua preferência, com privilégios de DBA, e altere o valor do parâmetro UNDO_RETENTION para o valor de 604800 (valor em segundos correspondente ao período de 1 semana):
+                    ALTER SYSTEM SET UNDO_RETENTION = 604800;
+
+Passo 2: Garantindo o período de retenção
+        Só aumentar o período de retenção (realizado no passo anterior) não garante que os dados das transações finalizadas permaneçam no UNDO Tablespace pelo período configurado no parâmetro UNDO_RETENTION. Para garantir a retenção de dados das transações finalizadas, é necessário alterar o tablespace executando o comando abaixo:
+                    ALTER TABLESPACE undotbs1 RETENTION GUARANTEE;
+
+         Obs.: Substitua undotbs1 pelo nome correspondente do tablespace de UNDO. 
+
+
+     CUIDADO! Ao implementar as configurações acima, o tamanho do UNDO tablespace aumentará considerávelmente, pois será necessário ter espaço adicional para armazenar mais dados, pelo tempo maior configurado. Quanto maior o tempo de retenção, maior poderá ser o tamanho do UNDO Tablespace. Para calcular o tamanho mínimo necessário para ele, conforme configuração do parâmetro UNDO_RETENTION, execute a instrução SQL abaixo e configure-o de forma que ele possa armazenar o valor da coluna "NEEDED UNDO SIZE [MByte]":
+
+
+   SELECT     d.undo_size/(1024*1024) "ACTUAL UNDO SIZE [MByte]",
+                      SUBSTR(e.value,1,25) "UNDO RETENTION [Sec]",
+                      (TO_NUMBER(e.value) * TO_NUMBER(f.value) *
+                     g.undo_block_per_sec) / (1024*1024)
+                   "NEEDED UNDO SIZE [MByte]"
+  FROM        (SELECT       SUM(a.bytes) undo_size
+                       FROM        v$datafile a
+                       inner join  v$tablespace b
+                              on      a.ts# = b.ts#
+                        inner join  dba_tablespaces c
+                              on      b.name = c.tablespace_name
+                       WHERE       c.contents = 'UNDO'
+                      AND         c.status = 'ONLINE') d,
+                      v$parameter e,
+                      v$parameter f,        
+                     ( SELECT   MAX(undoblks/((end_time-begin_time)*3600*24)) undo_block_per_sec
+                       FROM    v$undostat) g
+  WHERE   e.name = 'undo_retention'
+  AND         f.name = 'db_block_size';
+
+-- Select calcula UNDO RETENTION
+SELECT d.undo_size/(1024*1024) "ACTUAL UNDO SIZE [MByte]",
+SUBSTR(e.value,1,25) "UNDO RETENTION [Sec]",
+ROUND((d.undo_size / (to_number(f.value) *
+g.undo_block_per_sec))) "OPTIMAL UNDO RETENTION [Sec]"
+FROM (
+SELECT SUM(a.bytes) undo_size
+FROM v$datafile a,
+v$tablespace b,
+dba_tablespaces c
+WHERE c.contents = 'UNDO'
+AND c.status = 'ONLINE'
+AND b.name = c.tablespace_name
+AND a.ts# = b.ts#
+) d,
+v$parameter e,
+v$parameter f,
+(
+SELECT MAX(undoblks/((end_time-begin_time)*3600*24))
+undo_block_per_sec
+FROM v$undostat
+) g
+WHERE e.name = 'undo_retention'
+AND f.name = 'db_block_size'
+AND f.name = 'db_block_size';
+
+
+
+Segue simples select para verificar as transações correntes do banco de dados e seu segmento de UNDO que está utilizando:
+
+select t.start_time,t.used_ublk,s.username,r.segment_name from v$transaction t,v$session s, dba_rollback_segs r where t.ses_addr=s.saddr and t.xidusn=r.segment_id;
+
+   Segue Calculo da UNDO_RETENTION
+
+O valor UNDO_RETENTION deve ser pelo menos igual ao comprimento das mais longas consulta em execução em um determinada instância do banco de dados.
+Isto pode ser determinado por meio de consulta visão V$UNDOSTAT uma vez que o banco de dados foi executado por um tempo, segue query:
+select max(maxquerylen) from v$undostat;
+
+Isso precisa ser capturado quando o sistema tem funcionado por um tempo e é plenamente utilizado.
+
+   Segue Calculo do tamanho da Tablespace de UNDO
+
+UndoSpace = [UR * (UPS * DBS)] + (DBS * 24)
+
+(UR) UNDO_RETENTION em segundos
+(UPS) Numero do undo data blocks gerado por segundo
+(DBS) Sobrecarga varia de acordo com o extend e o tamanho do arquivo (db_block_size)
+Você pode obter o resulatado nos arquivo de parametros(pfile e spfile) UNDO_RETENTION(UR) e DB_BLOCK_SIZE(DBS)
+O UPS requer uma query para pegar o numero de segmentos de undo gerado por segundo na v$undostat
+A query para calcular o total de blocos gerados e dividido pela quantidade de tempo monitorado, segue:
+SELECT (SUM(undoblks))/ SUM ((end_time – begin_time) * 86400) FROM v$undostat;
+
+A coluna END_TIME e BEGIN_TIME são colunas do tipo data, o resultado gerará em dias você terá que converter para segundos, você pode multiplucas por 86400 segundos que é o numero de segundos no dia
+
+O resultado da consulta retorna o número de blocos de undo por segundo e este valor precisa ser multiplicado pelo tamanho de um bloco de undo (DB_BLOCK_SIZE).
+
+A query a seguir calcula o número de bytes que é necessário
+
+SQL> SELECT (UR * (UPS * DBS)) + (DBS * 24) AS “Bytes”
+FROM (SELECT value AS UR FROM v$parameter WHERE name = ‘undo_retention’),
+(SELECT (SUM(undoblks)/SUM(((end_time – begin_time)*86400))) AS UPS FROM v$undostat),
+(select block_size as DBS from dba_tablespaces where tablespace_name=
+(select upper(value) from v$parameter where name = ‘undo_tablespace’));
+
+
+
+
+
+
+
+
+
+Scripts to check Rollback Segments information
+
+
+Rollback segment Information
+
+SELECT segment_name, tablespace_name, status
+        FROM sys.dba_rollback_segs;
+SELECT segment_name, tablespace_name, (bytes)/1024/1024, blocks, extents
+        FROM sys.dba_segments
+   WHERE segment_type = 'ROLLBACK';
+
+SELECT name, xacts "ACTIVE TRANSACTIONS" FROM v$rollname, v$rollstat WHERE status = 'PENDING OFFLINE' AND v$rollname.usn = v$rollstat.usn;
+
+SELECT segment_name, tablespace_name, owner
+       FROM sys.dba_rollback_segs;
+
+SELECT segment_name, segment_type, tablespace_name
+     FROM sys.dba_segments
+WHERE segment_type = 'DEFERRED ROLLBACK';
+
+Shrinking Rollback segment command
+
+ALTER ROLLBACK SEGMENT rbs1 SHRINK TO 100K;
+
+select count(*) from dba_extents where tablespace_name='RBSTS';
+
+Shrinking all rollback Segments
+
+spool shrink_em.sql
+select 'alter rollback segment '||segment_name||' shrink to 2;' from dba_rollback_segs where tablespace_name='RBSTS';
+spool off
+@shrink_em.sql
+
+Number of rollback extents
+
+select count(*) from dba_extents where tablespace_name='RBSTS';
+
+Finding Rollback Segment Size
+
+SQL> select segment_name,sum(bytes) from dba_segments where
+> tablespace_name
+> = 'RBS' and segment_name
+> = 'RBS17' group by segment_name;
+>
+> SEGMENT_NAME SUM(BYTES)
+> ------------------------ ----------
+> RBS17 22364160
+
+Finding Rollback Segment Optimal Size
+
+> SQL> select rs.optsize, rs.extents
+> 2 from dba_rollback_segs drs,
+> 3 v$rollstat rs
+> 4 where drs.segment_name = 'RBS17'
+> 5 and drs.segment_id = rs.usn;
+>
+> OPTSIZE EXTENTS
+> ---------- ----------
+> 22020096 21
+
+Shrinking Rollback Segment
+
+> SQL> alter rollback segment RBS17 shrink to 10M;
+>
+> Rollback segment altered.
+Script to shrink all rollback Segments
+-- Script: shrink_rollback_segs.sql
+-- Purpose:            to shrink all online rollback segments back to optimal
+-------------------------------------------------------------------------------
+@save_sqlplus_settings
+
+set pagesize 0
+set termout off
+
+spool shrink_rollback_segs.tmp
+select
+  'alter rollback segment ' || segment_name || ' shrink;'
+from
+  sys.dba_rollback_segs
+where
+  status = 'ONLINE'
+/
+spool off
+
+@shrink_rollback_segs.tmp
+
+host rm -f shrink_rollback_segs.tmp                -- for Unix
+host del shrink_rollback_segs.tmp   -- for others
+
+Finding Current Optimal and Suggested Optimal
+
+column name format a30 heading "Rollback Segment"
+column optsize format 99999999999 heading "Current Optimal"
+column new_opt format 99999999999 heading "Suggested Optimal"
+
+select
+  n.name,
+  s.optsize,
+  ( ceil(s.extents * (s.optsize + s.aveshrink)/(s.rssize + p.value))
+    * (s.rssize + p.value)
+    / s.extents
+  ) - p.value  new_opt
+from
+  ( select
+      optsize,
+      avg(rssize)     rssize,
+      avg(extents)    extents,
+      max(wraps)      wraps,
+      max(shrinks)    shrinks,
+      avg(aveshrink)  aveshrink
+    from
+      sys.v_$rollstat
+    where
+      optsize is not null and
+      status = 'ONLINE'
+    group by
+      optsize
+  )  s,
+  ( select
+      kvisval  value
+    from
+      sys.x_$kvis
+    where
+      kvistag = 'kcbbkl' )  p,
+  sys.v_$rollstat  r,
+  sys.v_$rollname  n
+where
+  s.shrinks > 1 and
+  s.shrinks > s.wraps / ceil(s.optsize / ((s.rssize + p.value) / s.extents)) and
+  r.optsize = s.optsize and
+  r.status = 'ONLINE' and
+  n.usn = r.usn
+/
+
+Generating Shrink commands (Examples)
+
+select b.segment_name,b.tablespace_name,a.extents,a.rssize,a.xacts,a.optsize,a.shrinks,a.wraps,a.status from v$rollstat a, dba_rollback_segs b where b.segment_id = a.usn;
+
+select 'alter rollback segment ' || segment_name || ' shrink;' from sys.dba_rollback_segs where status = 'ONLINE';
+
+SQL> select 'alter rollback segment ' || segment_name || ' shrink;' from sys.dba_rollback_segs where status = 'ONLINE';
+
+'ALTERROLLBACKSEGMENT'||SEGMENT_NAME||'SHRINK;'
+-------------------------------------------------------------
+alter rollback segment SYSTEM shrink;
+alter rollback segment R01 shrink;
+alter rollback segment R02 shrink;
+alter rollback segment R03 shrink;
+alter rollback segment R04 shrink;
+
+SQL> alter rollback segment R01 shrink;
+
+Rollback segment altered.
+
+SQL> alter rollback segment R02 shrink;
+
+Rollback segment altered.
+
+SQL> alter rollback segment R03 shrink;
+
+Rollback segment altered.
+
+SQL> alter rollback segment R04 shrink;
+
+Rollback segment altered.
+
+Enter value for tbs: RBS1
+old  11:                                      dba_data_files where tablespace_name in ('&tbs')) where
+new  11:                                      dba_data_files where tablespace_name in ('RBS1')) where
+Enter value for tbs: RBS1
+old  12:                                      tablespace_name in ('&tbs')
+new  12:                                      tablespace_name in ('RBS1')
+
+Used Space(MB) allocated size(MB) maximum allowable (MB) effectivefree(MB)     % FREE
+-------------- ------------------ ---------------------- ----------------- ----------
+           200                500                    500               300         60
+
+
+
+SQL> SELECT segment_name, tablespace_name, (bytes)/1024/1024, blocks, extents
+        FROM sys.dba_segments
+   WHERE segment_type = 'ROLLBACK';  2    3
+
+SEGMENT_NAME                                                                      TABLESPACE_NAME           (BYTES)/1024/1024     BLOCKS    EXTENTS
+--------------------------------------------------------------------------------- ------------------------- ----------------- ---------- ----------
+SYSTEM                                                                            SYSTEM                             1.328125        170         17
+R0                                                                                                                          2        256          2
+R01                                                                               RBS1                                     50       6400         10
+R02                                                                                                                        50       6400         10
+R03                                                                                                                        50       6400         10
+R04                                                                                                                        50       6400         10
+
+6 rows selected.
+
+SQL> SELECT segment_name, tablespace_name, status
+        FROM sys.dba_rollback_segs;  2
+
+SEGMENT_NAME                   TABLESPACE_NAME           STATUS
+------------------------------ ------------------------- ----------------
+SYSTEM                         SYSTEM                    ONLINE
+R0                                                       OFFLINE
+R01                            RBS1                      ONLINE
+R02                                                      ONLINE
+R03                                                      ONLINE
+R04                                                      ONLINE
+
+SQL> SELECT segment_name, tablespace_name, (bytes)/1024/1024, blocks, extents
+        FROM sys.dba_segments
+   WHERE segment_type = 'ROLLBACK';  2    3
+
+SEGMENT_NAME                                                                      TABLESPACE_NAME           (BYTES)/1024/1024     BLOCKS    EXTENTS
+--------------------------------------------------------------------------------- ------------------------- ----------------- ---------- ----------
+SYSTEM                                                                            SYSTEM                             1.328125        170         17
+R0                                                                                                                          2        256          2
+R01                                                                               RBS1                                     50       6400         10
+R02                                                                                                                       345      44160         69
+R03                                                                                                                        50       6400         10
+R04                                                                                                                        50       6400         10
+
+6 rows selected.
+SQL> SELECT name, xacts "ACTIVE TRANSACTIONS" FROM v$rollname, v$rollstat WHERE status = 'PENDING OFFLINE' AND v$rollname.usn = v$rollstat.usn;
+
+no rows selected
+
+SQL> SELECT segment_name, segment_type, tablespace_name
+     FROM sys.dba_segments
+WHERE segment_type = 'DEFERRED ROLLBACK';  2    3
+
+no rows selected
+
+SQL> select b.segment_name,b.tablespace_name,a.extents,a.rssize,a.xacts,a.optsize,a.shrinks,a.wraps,a.status from v$rollstat a, dba_rollback_segs b where b.segment_id = a.usn;
+
+SEGMENT_NAME                   TABLESPACE_NAME              EXTENTS     RSSIZE      XACTS Current Optimal    SHRINKS      WRAPS STATUS
+------------------------------ ------------------------- ---------- ---------- ---------- --------------- ---------- ---------- ---------------
+SYSTEM                         SYSTEM                            17    1384448          0                          0          0 ONLINE
+R01                            RBS1                              10   52420608          0                          0        360 ONLINE
+R02                                                              69  361750528          0                          0        703 ONLINE
+R03                                                              10   52420608          0                          0        710 ONLINE
+R04                                                              10   52420608          0                          0        356 ONLINE
