@@ -1,0 +1,83 @@
+HugePages para RHEL
+
+1 - GARANTA que todos os bancos não estejam usando AMM. Você deverá utilizar SGA_TARGET e PGA_AGGREGATE_TARGET nos bancos pois HugePages não é compatível com AMM.
+Acesse o banco e verifique se o parâmetro "memory_target" está igual a zero (deverá estar).
+
+2 - Acesse cada instance (exceto a instance do ASM) e SOME as SGA de cada um (show sga)
+
+Exemplo:
+
+SQL> show sga;
+Total System Global Area 2137886720 bytes <------------
+Fixed Size 2230072 bytes
+Variable Size 369101000 bytes
+Database Buffers 1694498816 bytes
+Redo Buffers 72056832 bytes
+
+
+
+3 - Verifique o tamanho do HugePagesize do seu SO
+
+[root@us-or01 ~]# cat /proc/meminfo | grep ^Huge
+
+Exemplo de saída:
+HugePages_Total: 0
+HugePages_Free: 0
+HugePages_Rsvd: 0
+Hugepagesize: 2048 kB <---------------
+
+4 - Execute os cálculos com a fórmula abaixo para saber quanto irá alocar:
+
+Número de HugePages = Soma (SGA1 + SGA2 + ... ) / ( Hugepagesize * 1024 )
+
+Exemplo:
+
+= ( 2137886720 ) / ( 2048 * 1024 )
+
+Número de HugePages = 1019,42 <---------------------
+
+Normalmente se coloca um pouco mais (é prudente). Neste caso vamos fechar o valor do número de HugePages em 1100.
+
+5 - Agora vamos configurar o kernel do linux para alocar o HugePages:
+
+vi /etc/sysctl.conf
+vm.nr_hugepages = 1100
+
+6 - Edite o /etc/security/limits.conf
+
+* soft memlock 60397977
+* hard memlock 60397977
+
+O valor "60397977" é um valor maior que a soma de todas as SGAs.
+
+Depois de alterar tudo, reinicie o SO.
+
+7 - Para verificar se o HugePages está em uso, utilize:
+
+[root@us-or01 ~]# cat /proc/meminfo | grep ^Huge
+HugePages_Total: 1100
+HugePages_Free: 729
+HugePages_Rsvd: 232
+Hugepagesize: 2048 kB
+
+
+
+
+
+8 - Para visualizar quando de memória está sendo gasta com esta tabela de Kernel usem o seguinte
+comando:
+
+cat /proc/meminfo | grep PageTables
+
+Segue um exemplo de saída encontrado:
+PageTables: 3146044 kB
+
+- 
+
+
+
+
+ALTER SYSTEM SET use_large_pages=only SCOPE=SPFILE;
+ALTER SYSTEM SET use_large_pages=TRUE SCOPE=SPFILE;
+
+
