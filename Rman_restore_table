@@ -1,0 +1,25 @@
+run {
+configure default device type to sbt;
+configure channel device type sbt parms 'ENV=(NB_ORA_POLICY=KROTON_ORACLE_RMAN_KRTNORACLX4_BDPRODDR,NB_ORA_SCHED=Default-Application-Backup,NB_ORA_SERV=sts27lnx)';
+configure device type sbt parallelism 4;
+recover table PRODUCAO.SERVALUN
+until time "to_date ('16/01/2018 05:00:00 ','DD/MM/YYYY HH24: MI: SS ')"
+AUXILIARY DESTINATION '/u02/bdprod'
+DATAPUMP DESTINATION '/u02/bdprod/dump'
+DUMP FILE 'RODUCAO.SERVALUN_20190116_05h00.dmp'
+NOTABLEIMPORT;
+}
+
+run {
+configure default device type to sbt;
+configure channel device type sbt parms 'ENV=(NB_ORA_POLICY=KROTON_ORACLE_RMAN_KRTNORACLX4_BDPRODDR,NB_ORA_SCHED=Default-Application-Backup,NB_ORA_SERV=sts27lnx)';
+configure device type sbt parallelism 4;
+recover table PRODUCAO.SERVALUN
+until time "to_date ('16/01/2019 05:00:00 ','DD/MM/YYYY HH24: MI: SS ')"
+AUXILIARY DESTINATION '/u02/bdprod'
+DATAPUMP DESTINATION '/u02/bdprod/dump'
+DUMP FILE 'RODUCAO.SERVALUN_20190116_05h00.dmp'
+NOTABLEIMPORT;
+}
+
+Ter no mínimo de espaço o que contem a SYSTEM,SYSAUX,TEMP e UNDO
