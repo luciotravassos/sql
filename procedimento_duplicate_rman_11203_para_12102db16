@@ -1,0 +1,660 @@
+1- Fazer o restore/recover do banco
+
+Crie a nova instance e proceda:
+
+shutdown immediate;
+
+startup  nomount ;
+
+alter system set resource_limit=false scope=both;
+
+create pfile='/u01/init/init_ora33.ora' from spfile;
+
+shutdown abort;
+
+alterar os parametros:
+
+vi /u01/init/init_ora33.ora
+
+*.db_name='ora26' -- NOME da base source
+*.db_recovery_file_dest=''
+*.db_unique_name='ora33' --NOME da base destino
+
+sqlplus / as sysdba
+
+startup nomount pfile='/u01/init/init_ora33.ora' force;
+
+create spfile='+DATA/ora33/spfileora33.ora' from pfile='/u01/init/init_ora33.ora' ;
+
+shutdown immediate;
+
+srvctl modify database -d ora33 -p +DATA/ora33/spfileora33.ora
+
+
+Acessar user grid:
+
+Entrar no ASMCMD no database criado(data/fra/reco)e deixar apenas:
+
+PARAMETERFILE/
+PASSWORD/
+
+
+Acessar user oracle:
+
+startup  nomount ;
+
+RMAN>
+restore controlfile from '/u02/bases_producao/bdprod_10082015_enturmacao/bdemp_10082015_bdemp_3fqko81j_1_1_111.ctrl';
+alter database mount;
+
+catalog start with '/u02/bases_producao/bdprod_10082015_enturmacao';
+
+CONFIGURE DEFAULT DEVICE TYPE TO disk;
+CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE DISK clear;
+CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE disk clear;
+CONFIGURE DEVICE TYPE DISK PARALLELISM 1 BACKUP TYPE TO BACKUPSET;
+CONFIGURE DATAFILE BACKUP COPIES FOR DEVICE TYPE disk clear;
+CONFIGURE DATAFILE BACKUP COPIES FOR DEVICE TYPE DISK TO 4;
+CONFIGURE ARCHIVELOG BACKUP COPIES FOR DEVICE TYPE disk clear;
+CONFIGURE ARCHIVELOG BACKUP COPIES FOR DEVICE TYPE DISK TO 4;
+CONFIGURE CHANNEL DEVICE TYPE disk clear;
+CONFIGURE MAXSETSIZE TO UNLIMITED;
+CONFIGURE ENCRYPTION FOR DATABASE OFF;
+CONFIGURE ENCRYPTION ALGORITHM 'AES128';
+CONFIGURE COMPRESSION ALGORITHM 'BASIC' AS OF RELEASE 'DEFAULT' OPTIMIZE FOR LOAD TRUE;
+CONFIGURE ARCHIVELOG DELETION POLICY TO SHIPPED TO STANDBY;
+CONFIGURE SNAPSHOT CONTROLFILE NAME clear;
+CONFIGURE SNAPSHOT CONTROLFILE NAME clear;
+configure controlfile autobackup off;
+CONFIGURE CHANNEL DEVICE TYPE 'SBT_TAPE' clear;
+CONFIGURE CHANNEL DEVICE TYPE 'SBT_TAPE' clear;
+CONFIGURE ARCHIVELOG BACKUP COPIES FOR DEVICE TYPE SBT_TAPE clear;
+CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE' clear;
+CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 8 DAYS;
+
+run {
+set newname for database to '+DATA';
+allocate channel c1 device type disk;
+allocate channel c2 device type disk;
+allocate channel c3 device type disk;
+allocate channel c4 device type disk;
+allocate channel c5 device type disk;
+allocate channel c6 device type disk;
+allocate channel c7 device type disk;
+allocate channel c8 device type disk;
+allocate channel c9 device type disk;
+allocate channel c10 device type disk;
+allocate channel c11 device type disk;
+allocate channel c12 device type disk;
+restore database;
+switch datafile all;
+}
+
+recover database;
+--[ATENÇÃO PARA O ERRO ABAIXO]--
+RMAN-06053: unable to perform media recovery because of missing log   
+RMAN-06025: no backup of archived log for thread 2 with sequence 99142 and starting SCN of 121161933120 found to restore
+
+
+ run
+ {
+allocate channel c1 device type disk;
+allocate channel c2 device type disk;
+set until sequence 254 thread 4;
+recover database;
+}
+
+Remover os standby redos -- apenas no caso do backup ter vindo de uma base standby database
+
+SQLPLUS>
+select 'alter database drop standby logfile group '||group#||';' from v$logfile where type='STANDBY';
+
+ALTERAR O CAMINHO DOS REDOS
+
+SQLPLUS>
+
+select 'alter database rename file '||''''||member||''''||' to '||''''||'+DATA'||''''||';' from v$logfile;
+
+select 'alter database rename file '||''''||member||''''||' to '||''''||'+RECO'||''''||';' from v$logfile;
+
+SE DER ERRO:
+ORA-01511: erro ao renomear os arquivos de log/dados
+ORA-01378: Tamanho do bloco logico (4096) do arquivo +DATA n?o e compativel com o tamanho do setor de disco (tamanho medio do setor 512 e tamanho do setor do host e 512)
+ORA-00312: thread 20 do log 1 on-line: '+DATA'
+
+Rodar o comando abaixo:
+
+alter system set "_disk_sector_size_override"=TRUE scope=both sid='*';
+
+alter system set cluster_database=FALSE scope=spfile;
+
+shutdown immediate;
+
+startup mount;
+
+alter database open resetlogs upgrade;
+
+===============SE DER ERRO ======================
+SQL> alter database open resetlogs;
+alter database open resetlogs
+*
+ERROR at line 1:
+ORA-01152: o arquivo 1 n?o foi restaurado a partir de um backup suficientemente antigo
+ORA-01110: 1 do arquivo de dados: '+DATA/bdemp/datafile/system.3643.868923655'
+
+Rodar:
+
+alter system set "_allow_resetlogs_corruption" = true scope = spfile sid='*';
+startup mount force;
+
+
+
+ORA-00604: error occurred at recursive SQL level 1
+ORA-01555: snapshot too old: rollback segment number 5 with name "_SYSSMU5$" too small
+alter system set "_corrupted_rollback_segments"=('_SYSSMU5$')
+
+
+
+======
+
+
+--> alter database enable public thread <n>; -- usually 2
+
+alter database disable thread
+
+
+======
+
+
+alter database open resetlogs upgrade;
+
+=====================================
+
+CRIAR UMA TEMP NOVA, DROPAR AS ANTERIORES
+
+select name from v$tempfile;
+
+create temporary tablespace TEMP tempfile '+DATA' size 31G;
+create temporary tablespace TEMP02 tempfile '+DATA' size 12G;
+create temporary tablespace TEMP05 tempfile '+DATA' size 1G;
+create temporary tablespace TEMP01 tempfile '+DATA' size 12G;
+alter database default temporary tablespace temp02;
+alter database default temporary tablespace temp05;
+alter database default temporary tablespace temp01;
+alter database default temporary tablespace temp;
+DROP TABLESPACE temp02 INCLUDING CONTENTS AND DATAFILES;
+DROP TABLESPACE temp01 INCLUDING CONTENTS AND DATAFILES;
+DROP TABLESPACE temp05 INCLUDING CONTENTS AND DATAFILES;
+DROP TABLESPACE temp INCLUDING CONTENTS AND DATAFILES;
+DROP TABLESPACE rm_tmp INCLUDING CONTENTS AND DATAFILES;
+OU SE NUM DROPAR:
+
+ALTER DATABASE TEMPFILE 'DATA/ora33/TEMPFILE/temp.3130.918252775'  DROP INCLUDING DATAFILES;
+
+select 'alter user '||username|| ' TEMPORARY TABLESPACE TEMP ;' from dba_users;
+
+
+create pfile='/u01/init/init_ora33.ora' from spfile;
+
+alter system set cluster_database=FALSE scope=spfile ;
+
+alter database disable thread 2;
+
+create pfile='/tmp/init_ora33.ora' from spfile;
+
+/tmp/init.ora
+EM RAC-> start 1 node in cluster_mode=false (criar um pfile from spfile e altearar o paremetro)
+
+srvctl stop  database -d ora33
+
+STARTUP MOUNT pfile='/tmp/init_ora33.ora';
+
+Alterar o nome do banco
+
+.oraenv
+nid target=sys/oracle DBNAME=nomenovo
+nid target=sys/oracle DBNAME=ora33
+
+SE DER MERDA!!!!!!!!!
+nid target=sys/oracle@ora33 REVERT=Y
+
+STARTUP NOMOUNT;
+
+ALTER SYSTEM RESET DB_NAME;
+
+ALTER SYSTEM SET DB_NAME=ora33 SCOPE=spfile  sid='*';
+
+shutdown immediate;
+
+startup mount;
+
+alter database noarchivelog;
+
+alter database open resetlogs upgrade;
+
+
+create pfile='/u01/init/init_ora33.ora' from spfile;
+
+======================================
+alter system set "_allow_resetlogs_corruption" =true scope =spfile sid='*';
+recover database using backup controlfile until cancel;
+
+alter system set log_archive_dest_1='LOCATION=+FRA' scope=both sid='*';
+alter system set log_archive_format='archive_%d_%t_%s_%r.arc' scope=spfile sid='*';
+alter system set filesystemio_options=SETALL scope=spfile sid='*';
+
+col GROUP# for 999
+col THREAD# for 999
+col MEMBER for a70
+set lines 800
+SELECT a.GROUP#, a.THREAD#,a.ARCHIVED, a.STATUS, b.MEMBER, a.BYTES/1024/1024 FROM V$LOG a, v$logfile b where a.GROUP#=b.GROUP# order by 2,1;
+alter system switch logfile ;
+alter system checkpoint ;
+SELECT a.GROUP#, a.THREAD#,a.ARCHIVED, a.STATUS, b.MEMBER, a.BYTES/1024/1024 FROM V$LOG a, v$logfile b where a.GROUP#=b.GROUP# order by 2,1;
+
+alter database disable thread 1;
+alter database disable thread 3;
+alter database disable thread 4;
+alter database disable thread 2;
+
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 1 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 2 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 3 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 4 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 5 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 6 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 7 ('+RECO','+FRA') size 512m;
+ALTER DATABASE ADD LOGFILE THREAD 2 GROUP 8 ('+RECO','+FRA') size 512m;
+
+ALTER DATABASE DROP LOGFILE GROUP 
+======================================
+
+connectar como SYSDBA
+
+purge dba_recyclebin;
+purge recyclebin;
+
+cd $ORACLE_HOME/rdbms/admin
+$ORACLE_HOME/perl/bin/perl catctl.pl -n 8 catupgrd.sql    
+$ORACLE_HOME/perl/bin/perl catctl.pl -n 6 -l $ORACLE_HOME/diagnostics/tp215 catupgrd.sql
+
+
+Argument list for [catctl.pl]
+SQL Process Count     n = 4
+SQL PDB Process Count N = 0
+Input Directory       d = 0
+Phase Logging Table   t = 0
+Log Dir               l = /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics
+Script                s = 0
+Serial Run            S = 0
+Upgrade Mode active   M = 0
+Start Phase           p = 0
+End Phase             P = 0
+Log Id                i = 0
+Run in                c = 0
+Do not run in         C = 0
+Echo OFF              e = 1
+No Post Upgrade       x = 0
+Reverse Order         r = 0
+Open Mode Normal      o = 0
+Debug catcon.pm       z = 0
+Debug catctl.pl       Z = 0
+Display Phases        y = 0
+Child Process         I = 0
+
+catctl.pl version: 12.1.0.2.0
+Oracle Base           = /opt/app/oracle
+
+Analyzing file catupgrd.sql
+Log files in /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics
+catcon: ALL catcon-related output will be written to /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_catcon_3508.lst
+catcon: See /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd*.log files for output generated by scripts
+catcon: See /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_*.lst files for spool files, if any
+Number of Cpus        = 4
+SQL Process Count     = 4
+
+------------------------------------------------------
+Phases [0-73]         Start Time:[2015_04_27 12:23:18]
+------------------------------------------------------
+Serial   Phase #: 0 Files: 1     Time: 111s
+Serial   Phase #: 1 Files: 5     Time: 60s
+Restart  Phase #: 2 Files: 1     Time: 0s
+Parallel Phase #: 3 Files: 18    Time: 15s
+Restart  Phase #: 4 Files: 1     Time: 0s
+Serial   Phase #: 5 Files: 5     Time: 25s
+Serial   Phase #: 6 Files: 1     Time: 18s
+Serial   Phase #: 7 Files: 4     Time: 11s
+Restart  Phase #: 8 Files: 1     Time: 0s
+Parallel Phase #: 9 Files: 62    Time: 44s
+Restart  Phase #:10 Files: 1     Time: 0s
+Serial   Phase #:11 Files: 1     Time: 19s
+Restart  Phase #:12 Files: 1     Time: 0s
+Parallel Phase #:13 Files: 91    Time: 11s
+Restart  Phase #:14 Files: 1     Time: 0s
+Parallel Phase #:15 Files: 111   Time: 21s
+Restart  Phase #:16 Files: 1     Time: 0s
+Serial   Phase #:17 Files: 3     Time: 1s
+Restart  Phase #:18 Files: 1     Time: 0s
+Parallel Phase #:19 Files: 32    Time: 25s
+Restart  Phase #:20 Files: 1     Time: 0s
+Serial   Phase #:21 Files: 3     Time: 8s
+Restart  Phase #:22 Files: 1     Time: 0s
+Parallel Phase #:23 Files: 23    Time: 100s
+Restart  Phase #:24 Files: 1     Time: 0s
+Parallel Phase #:25 Files: 11    Time: 45s
+Restart  Phase #:26 Files: 1     Time: 1s
+Serial   Phase #:27 Files: 1     Time: 0s
+Restart  Phase #:28 Files: 1     Time: 0s
+Serial   Phase #:30 Files: 1     Time: 0s
+Serial   Phase #:31 Files: 257   Time: 25s
+Serial   Phase #:32 Files: 1     Time: 0s
+Restart  Phase #:33 Files: 1     Time: 0s
+Serial   Phase #:34 Files: 1     Time: 5s
+Restart  Phase #:35 Files: 1     Time: 0s
+Restart  Phase #:36 Files: 1     Time: 0s
+Serial   Phase #:37 Files: 4     Time: 60s
+Restart  Phase #:38 Files: 1     Time: 0s
+Parallel Phase #:39 Files: 13    Time: 61s
+Restart  Phase #:40 Files: 1     Time: 1s
+Parallel Phase #:41 Files: 10    Time: 7s
+Restart  Phase #:42 Files: 1     Time: 0s
+Serial   Phase #:43 Files: 1     Time: 7s
+Restart  Phase #:44 Files: 1     Time: 0s
+Serial   Phase #:45 Files: 1     Time: 6s
+Serial   Phase #:46 Files: 1     Time: 0s
+Restart  Phase #:47 Files: 1     Time: 0s
+Serial   Phase #:48 Files: 1     Time: 108s
+Restart  Phase #:49 Files: 1     Time: 0s
+Serial   Phase #:50 Files: 1     Time: 38s
+Restart  Phase #:51 Files: 1     Time: 0s
+Serial   Phase #:52 Files: 1     Time: 0s
+Restart  Phase #:53 Files: 1     Time: 1s
+Serial   Phase #:54 Files: 1     Time: 106s
+Restart  Phase #:55 Files: 1     Time: 0s
+Serial   Phase #:56 Files: 1     Time: 75s
+Restart  Phase #:57 Files: 1     Time: 0s
+Serial   Phase #:58 Files: 1     Time: 1s
+Restart  Phase #:59 Files: 1     Time: 0s
+Serial   Phase #:60 Files: 1     Time: 0s
+Restart  Phase #:61 Files: 1     Time: 0s
+Serial   Phase #:62 Files: 1     Time: 17s
+Restart  Phase #:63 Files: 1     Time: 0s
+Serial   Phase #:64 Files: 1     Time: 2s
+Serial   Phase #:65 Files: 1 Calling sqlpatch with LD_LIBRARY_PATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LD_LIBRARY_PATH; LIBPATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LIBPATH; LD_LIBRARY_PATH_64=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LD_LIBRARY_PATH_64; DYLD_LIBRARY_PATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export DYLD_LIBRARY_PATH; /opt/app/oracle/product/12.1.0/dbhome_2/perl/bin/perl -I /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin -I /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin/../../sqlpatch /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin/../../sqlpatch/sqlpatch.pl -verbose -upgrade_mode_only > /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_datapatch_upgrade.log 2> /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_datapatch_upgrade.err
+returned from sqlpatch
+    Time: 44s
+Serial   Phase #:66 Files: 1     Time: 33s
+Serial   Phase #:68 Files: 1     Time: 0s
+Serial   Phase #:69 Files: 1 Calling sqlpatch with LD_LIBRARY_PATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LD_LIBRARY_PATH; LIBPATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LIBPATH; LD_LIBRARY_PATH_64=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export LD_LIBRARY_PATH_64; DYLD_LIBRARY_PATH=/opt/app/oracle/product/12.1.0/dbhome_2/lib; export DYLD_LIBRARY_PATH; /opt/app/oracle/product/12.1.0/dbhome_2/perl/bin/perl -I /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin -I /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin/../../sqlpatch /opt/app/oracle/product/12.1.0/dbhome_2/rdbms/admin/../../sqlpatch/sqlpatch.pl -verbose > /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_datapatch_normal.log 2> /opt/app/oracle/product/12.1.0/dbhome_2/diagnostics/catupgrd_datapatch_normal.err
+returned from sqlpatch
+ Time: 57s
+Serial   Phase #:70 Files: 1     Time: 124s
+Serial   Phase #:71 Files: 1     Time: 1s
+Serial   Phase #:72 Files: 1     Time: 0s
+Serial   Phase #:73 Files: 1 Use of uninitialized value $gsRTInclusion in concatenation (.) or string at catctl.pl line 1500.
+    Time: 19s
+
+------------------------------------------------------
+Phases [0-73]         End Time:[2015_04_27 12:45:11]
+------------------------------------------------------
+
+Grand Total Time: 1315s
+
+LOG FILES: (catupgrd*.log)
+
+Upgrade Summary Report Located in:
+/opt/app/oracle/product/12.1.0/dbhome_2/cfgtoollogs/std11g2/upgrade/upg_summary.log
+
+Grand Total Upgrade Time:    [0d:0h:21m:55s]
+Upgrade summary log showed the following.
+
+Oracle Database 12.1 Post-Upgrade Status Tool           04-27-2015 12:50:10
+
+Component                               Current         Version  Elapsed Time
+Name                                    Status          Number   HH:MM:SS
+
+Oracle Server                          UPGRADED      12.1.0.2.0  00:11:25
+JServer JAVA Virtual Machine              VALID      12.1.0.2.0  00:01:47
+Oracle Real Application Clusters     OPTION OFF      12.1.0.2.0  00:00:01
+Oracle Workspace Manager                  VALID      12.1.0.2.0  00:01:00
+Oracle XDK                                VALID      12.1.0.2.0  00:00:38
+Oracle XML Database                       VALID      12.1.0.2.0  00:01:46
+Oracle Database Java Packages             VALID      12.1.0.2.0  00:00:13
+Final Actions                                                    00:01:16
+Post Upgrade                                                     00:02:02
+
+6. Start the database and verify the registry entries.
+
+col ACTION_TIME for a35
+col ACTION for a25
+col VERSION for a25
+col COMMENTS for a60
+
+select action_time,action,version,comments from registry$history;
+
+ACTION_TIME                              ACTION                         VERSION                        COMMENTS
+---------------------------------------- ------------------------------ ------------------------------ ----------------------------------------
+22-JAN-15 05.21.55.225164 PM             APPLY                          11.2.0.4                       PSU 11.2.0.4.5
+27-APR-15 12.40.55.455359 PM             VIEW INVALIDATE                                               view invalidation
+27-APR-15 12.41.48.624963 PM             UPGRADE                        12.1.0.2.0                     Upgraded from 11.2.0.4.0
+
+
+SQL> 
+select substr(comp_name,1,40) comp_name, substr(comp_id,1,10) comp_id,substr(version,1,12) version,status from dba_registry order by 4;
+
+COMP_NAME                                          VERSION
+-------------------------------------------------- ------------------------------
+Oracle XML Database                                12.1.0.2.0
+Oracle Workspace Manager                           12.1.0.2.0
+Oracle Database Catalog Views                      12.1.0.2.0
+Oracle Database Packages and Types                 12.1.0.2.0
+JServer JAVA Virtual Machine                       12.1.0.2.0
+Oracle XDK                                         12.1.0.2.0
+Oracle Database Java Packages                      12.1.0.2.0
+Oracle Real Application Clusters                   12.1.0.2.0
+
+Se algo ficar invalido:
+
+select owner,object_name, object_type,status from all_objects where object_name ='CDB_USED_PRIVS';
+
+sqlplus / as sysdba 
+set serveroutput on;
+declare
+start_time date;
+end_time date;
+object_name varchar(100);
+object_id char(10);
+begin
+SELECT date_loading, date_loaded into start_time, end_time FROM registry$
+WHERE cid = 'CATPROC';
+SELECT obj#,name into object_id,object_name
+FROM obj$
+WHERE status > 1 AND
+(ctime BETWEEN start_time AND end_time OR
+mtime BETWEEN start_time AND end_time OR
+stime BETWEEN start_time AND end_time) AND
+ROWNUM <=1;
+dbms_output.put_line('Please compile Invalid object '||object_name||'
+Object_id '||object_id );
+EXCEPTION
+WHEN NO_DATA_FOUND THEN
+dbms_output.put_line('CATPROC can be validated now' );
+end;
+/
+grant select on ku$_m_view_log_pfh_view to public
+@?/rdbms/admin/catalog.sql
+@?/rdbms/admin/catproc.sql
+@?/rdbms/admin/utlrp.sql 12
+
+
+
+
+ 
+
+Note: Starting with Oracle Database 12c, Oracle XML DB is a mandatory component of Oracle Database. You cannot uninstall Oracle XML DB, and there is no option to exclude it when you create an Oracle database.
+
+Note: DBA_REGISTRY displays information about all components in the database that are loaded into the component registry. The component registry tracks components that can be separately loaded into the Oracle Database.
+
+2. Dealing with Oracle database components:
+
+2.1. Oracle OLAP catalog (AMD) component:
+
+
+This component is desupported with Oracle database 12c.  After upgrade from 11.2.0.4, this component is already exist with the status OPTION OFF. To remove it, then just execute the catnoamd.sql script before or after upgrade.
+
+
+SQL> connect / as sysdba
+SQL> @?/olap/admin/catnoamd.sql
+
+
+ 
+
+2.2. Oracle OLAP API (XOQ) component:
+
+
+Note: In my case, my Oracle database is an Enterprise Edition database that was created as a General Purpose, Transaction Processing, or Custom database without OLAP, then I am going to remove this component:
+
+Step 1: Remove the XOQ component:
+
+
+SQL> connect / as sysdba
+SQL> @?/olap/admin/olapidrp.plb
+SQL> @?/olap/admin/catnoxoq.sql
+
+
+Step 2: Clean OLAP-Related Objects (OLAP AW component):
+
+
+To ensure that Datapump (expdp) does not use the (possibly incorrect) export handlers for OLAP-related components:
+select * from sys.exppkgact$ where package ='DBMS_AW_EXP' and schema= 'SYS';
+delete from sys.exppkgact$ where package ='DBMS_AW_EXP' and schema= 'SYS';
+commit;
+
+
+Note : This step has been updated by Maciej Tokar!!
+
+
+To avoid the error: DataPump Export fails with PLS-201 identifier ‘SYS.DBMS_CUBE_EXP’
+SELECT * FROM SYS.EXPPKGACT$ WHERE PACKAGE = 'DBMS_CUBE_EXP';
+-- Backup the table SYS.EXPPKGACT$ before deleting the row 
+CREATE TABLE SYS.EXPPKGACT$_BACKUP AS SELECT * FROM SYS.EXPPKGACT$; 
+DELETE FROM SYS.EXPPKGACT$ WHERE PACKAGE = 'DBMS_CUBE_EXP' AND SCHEMA= 'SYS';
+COMMIT;
+SQL> shutdown immediate; 
+SQL> startup
+
+Note: Restart the database to ensure the error is resolved.
+
+Step 3: Resolve Invalid Objects
+
+Once the database has been started, resolve any invalid objects by running the utlrp.sql script:
+
+
+SQL> @?/rdbms/admin/utlrp.sql
+
+ 2.3. Oracle database Java & JServer Java VM components:
+
+The Oracle JVM contains a number of components including the following:
+
+- compiler: Standard Java compiler. When the CREATE JAVA SOURCE statement is run, it translates Java source files into architecture-neutral.
+- interpreter: To run Java programs, Oracle JVM includes a standard Java2 bytecode interpreter. The interpreter and the associated Java run-time system run standard Java class files. The run-time system supports native methods and call-in and call-out from the host environment.
+- library manager: Loads java source, class and resource files into the database
+- …..
+
+Note: I think these packages are useful after all, then I am going to remove them and to re-install them again.
+
+Step 1: Remove the JVM
+
+SQL> connect / as sysdba
+@?/xdk/admin/rmxml.sql
+@?/javavm/install/rmjvm.sql
+@?/rdbms/admin/catnojav.sql
+
+
+ 
+
+
+Note: If you want just to remove the JVM and you don’t want to install the JVM, then delete the JVM-Related objects to datapump (expdp).
+delete from exppkgobj$ where package like '%JVM%'; 
+commit;
+SQL> shutdown immediate; 
+SQL> startup
+
+Note: Restart the database to ensure the error is resolved.
+
+Step 2: Install the JVM
+
+SQL> connect / as sysdba
+@?/javavm/install/initjvm.sql
+@?/xdk/admin/initxml.sql
+@?/xdk/admin/xmlja.sql
+@?/rdbms/admin/catjava.sql
+
+
+Step 3: Resolve Invalid Objects
+
+Once the database has been started, resolve any invalid objects by running the utlrp.sql script:
+
+
+SQL> @?/rdbms/admin/utlrp.sql
+2.4. Oracle Multimedia (ORDIM) component :
+
+
+Oracle interMedia (“interMedia”) is a feature that enables Oracle Database to store, manage, and retrieve images, audio, video, … Oracle interMedia extends Oracle Database reliability, availability, and data management to multimedia content in traditional, Internet, electronic commerce, and media-rich applications.
+
+Note: I guess this component is useful, so I am going to re-enable it.
+
+Run the script as SYS, located in the $ORACLE_HOME/ord/im/admin/initimj.sql, that will reload those classes.
+
+
+SQL> connect / as sysdba
+SQL> @?/ord/im/admin/initimj.sql
+SQL> connect / as sysdba
+SQL> execute validate_ordim;
+
+
+ 
+
+2.5. Oracle Enterprise Manager  (EM) component:
+
+
+Starting with Oracle Database 12c, Oracle Enterprise Manager Database Control is desupported and is no longer available. Oracle introduces Oracle Enterprise Manager Database Express (Oracle EM Express) as a replacement. Oracle EM Express is installed when you upgrade to Oracle Database 12c.
+
+Note: For these reasons, I will remove this component by using the emremove.sql script.
+
+
+SQL> connect / as sysdba
+SQL> @?/rdbms/admin/emremove.sql
+
+
+
+
+
+
+
+
+ Após finalizar:
+
+cd $ORACLE_HOME/OPatch
+./datapatch -verbose
+
+
+alter system set cluster_database=true scope=spfile sid='*'; 
+
+shutdown immediate;
+
+startup mount;
+
+create pfile='/u01/init/init_ora33.ora' from spfile;
+
+alter database archivelog;
+
+alter system set log_archive_dest_1='LOCATION=+FRA' scope=both sid='*';
+alter system set log_archive_format='archive_%d_%t_%s_%r.arc' scope=spfile sid='*';
+alter system set filesystemio_options=SETALL scope=spfile sid='*';
+alter system set cluster_database=true scope=spfile sid='*'; 
+shutdown immediate;
+
+
+alter system set "_optimizer_cartesian_enabled" =false scope=both;
+
